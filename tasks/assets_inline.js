@@ -67,154 +67,163 @@ module.exports = function(grunt) {
 
     var filesToDelete = [];
 
-    this.files.forEach(function(filePair) {
-      // Check that the source file exists
-      if(filePair.src.length === 0) { return; }
+    this.files.forEach(function(file) {
+      var filePair = {
+        dest: file.dest,
+        src: ''
+      };
+      
+      file.src.forEach(function(src) {
+        filePair.src = src;
+        
+        // Check that the source file exists
+        if(filePair.src.length === 0) { return; }
 
-      // init cheerio
-      var $ = cheerio.load(grunt.file.read(filePair.src), {
-        decodeEntities: false
-      });
+        // init cheerio
+        var $ = cheerio.load(grunt.file.read(filePair.src), {
+          decodeEntities: false
+        });
 
-      grunt.log.writeln(('Reading: ').green + path.resolve(filePair.src.toString()));
+        grunt.log.writeln(('Reading: ').green + path.resolve(filePair.src.toString()));
 
-      $('style[data-assets-inline]').each(function () {
-        var style = $(this).html();
-        if(!style) { return; }
+        $('style[data-assets-inline]').each(function () {
+          var style = $(this).html();
+          if(!style) { return; }
 
-        var items = [];
-        // https://regex101.com/r/yP1yK0/1
-        var regex = /url\(["']?(.*?)["']?\)/ig;
-        var item;
+          var items = [];
+          // https://regex101.com/r/yP1yK0/1
+          var regex = /url\(["']?(.*?)["']?\)/ig;
+          var item;
 
-        while (item = regex.exec(style)) {
-          items.push(item[1]);
-        }
-
-        items.forEach(function(v) {
-          var src = v;
-          if (!src) { return; }
-          if (src.match(/^\/\//)) { return; }
-          if (!src.match(/.svg$/i)) { return; }
-          if (url.parse(src).protocol) { return; }
-
-          var filePath = (src.substr(0,1) === '/') ? path.resolve(options.assetsDir, src.substr(1)) : path.join(path.dirname(filePair.src), src);
-          grunt.log.writeln((' inline: ').cyan + filePath);
-
-          if (options.inlineSvgBase64) {
-            style = style.replace(src, 'data:image/svg+xml;base64,' + new Buffer(grunt.file.read(filePath, { encoding: null })).toString('base64'));
-          } else {
-            style = style.replace(src, 'data:image/svg+xml;utf8,' + processSvg(grunt.file.read(filePath)));
+          while (item = regex.exec(style)) {
+            items.push(item[1]);
           }
+
+          items.forEach(function(v) {
+            var src = v;
+            if (!src) { return; }
+            if (src.match(/^\/\//)) { return; }
+            if (!src.match(/.svg$/i)) { return; }
+            if (url.parse(src).protocol) { return; }
+
+            var filePath = (src.substr(0,1) === '/') ? path.resolve(options.assetsDir, src.substr(1)) : path.join(path.dirname(filePair.src), src);
+            grunt.log.writeln((' inline: ').cyan + filePath);
+
+            if (options.inlineSvgBase64) {
+              style = style.replace(src, 'data:image/svg+xml;base64,' + new Buffer(grunt.file.read(filePath, { encoding: null })).toString('base64'));
+            } else {
+              style = style.replace(src, 'data:image/svg+xml;utf8,' + processSvg(grunt.file.read(filePath)));
+            }
+
+            if (options.deleteOriginals) {
+              filesToDelete.push(filePath);
+            }
+          });
+
+          $(this).text(style);
+        });
+
+        $('link[rel="stylesheet"]').each(function () {
+          var style = $(this).attr('href');
+          if(!style) { return; }
+          if(style.match(/^\/\//)) { return; }
+          if(style.indexOf(options.includeTag) === -1) { return; }
+          style = style.replace(/\?.+$/, "");
+
+          //get attributes to keep them on the new element
+          var attributes = getAttributes($(this));
+          if (attributes.href){
+            //don't want to re-include the href
+            delete attributes.href;
+          }
+          if (attributes.rel){
+            //don't want to rel
+            delete attributes.rel;
+          }
+
+          if(url.parse(style).protocol) { return; }
+          var filePath = (style.substr(0,1) === "/") ? path.resolve(options.cssDir, style.substr(1)) : path.join(path.dirname(filePair.src), style);
+          grunt.log.writeln(('    css: ').cyan + filePath);
+          $(this).replaceWith(options.cssTags.start + grunt.file.read(filePath) + options.cssTags.end);
 
           if (options.deleteOriginals) {
             filesToDelete.push(filePath);
           }
         });
 
-        $(this).text(style);
-      });
+        $('script').each(function () {
+          var script = $(this).attr('src');
+          if(!script) { return; }
+          if(script.match(/^\/\//)) { return; }
+          if(script.indexOf(options.includeTag) === -1) { return; }
+          if(url.parse(script).protocol) { return; }
+          script = script.replace(/\?.+$/, "");
 
-      $('link[rel="stylesheet"]').each(function () {
-        var style = $(this).attr('href');
-        if(!style) { return; }
-        if(style.match(/^\/\//)) { return; }
-        if(style.indexOf(options.includeTag) === -1) { return; }
-        style = style.replace(/\?.+$/, "");
-
-        //get attributes to keep them on the new element
-        var attributes = getAttributes($(this));
-        if (attributes.href){
-          //don't want to re-include the href
-          delete attributes.href;
-        }
-        if (attributes.rel){
-          //don't want to rel
-          delete attributes.rel;
-        }
-
-        if(url.parse(style).protocol) { return; }
-        var filePath = (style.substr(0,1) === "/") ? path.resolve(options.cssDir, style.substr(1)) : path.join(path.dirname(filePair.src), style);
-        grunt.log.writeln(('    css: ').cyan + filePath);
-        $(this).replaceWith(options.cssTags.start + grunt.file.read(filePath) + options.cssTags.end);
-
-        if (options.deleteOriginals) {
-          filesToDelete.push(filePath);
-        }
-      });
-
-      $('script').each(function () {
-        var script = $(this).attr('src');
-        if(!script) { return; }
-        if(script.match(/^\/\//)) { return; }
-        if(script.indexOf(options.includeTag) === -1) { return; }
-        if(url.parse(script).protocol) { return; }
-        script = script.replace(/\?.+$/, "");
-
-        //get attributes to keep them on the new element
-        var attributes = getAttributes($(this));
-        if (attributes.src){
-          delete attributes.src;
-        }
-
-        var filePath = (script.substr(0,1) === "/") ? path.resolve(options.jsDir, script.substr(1)) : path.join(path.dirname(filePair.src), script);
-        grunt.log.writeln(('     js: ').cyan + filePath);
-
-        //create and replace script with new scipt tag
-        $(this).replaceWith(options.jsTags.start + uglifyJS(grunt.file.read(filePath)) + options.jsTags.end);
-
-        if (options.deleteOriginals) {
-          filesToDelete.push(filePath);
-        }
-      });
-
-      if (options.inlineSvg) {
-        $('img').each(function () {
-          var src = $(this).attr('src');
-          if (!src) { return; }
-          if (src.match(/^\/\//)) { return; }
-          if (!src.match(/.svg$/i)) { return; }
-          if (url.parse(src).protocol) { return; }
-
-          var filePath = (src.substr(0,1) === "/") ? path.resolve(options.assetsDir, src.substr(1)) : path.join(path.dirname(filePair.src), src);
-          grunt.log.writeln(('    svg: ').cyan + filePath);
-
-          if (options.inlineSvgBase64) {
-            $(this).attr('src', 'data:image/svg+xml;base64,' + new Buffer(grunt.file.read(filePath, { encoding: null })).toString('base64'));
-          } else {
-            $(this).attr('src', 'data:image/svg+xml;utf8,' + processSvg(grunt.file.read(filePath)));
+          //get attributes to keep them on the new element
+          var attributes = getAttributes($(this));
+          if (attributes.src){
+            delete attributes.src;
           }
+
+          var filePath = (script.substr(0,1) === "/") ? path.resolve(options.jsDir, script.substr(1)) : path.join(path.dirname(filePair.src), script);
+          grunt.log.writeln(('     js: ').cyan + filePath);
+
+          //create and replace script with new scipt tag
+          $(this).replaceWith(options.jsTags.start + uglifyJS(grunt.file.read(filePath)) + options.jsTags.end);
 
           if (options.deleteOriginals) {
             filesToDelete.push(filePath);
           }
         });
-      }
 
-      if (options.inlineImg) {
-        $('img').each(function () {
-          var src = $(this).attr('src');
-          if (!src) { return; }
-          if (src.match(/^\/\//)) { return; }
-          if (src.match(/.svg$/i)) { return; }
-          if (url.parse(src).protocol) { return; }
+        if (options.inlineSvg) {
+          $('img').each(function () {
+            var src = $(this).attr('src');
+            if (!src) { return; }
+            if (src.match(/^\/\//)) { return; }
+            if (!src.match(/.svg$/i)) { return; }
+            if (url.parse(src).protocol) { return; }
 
-          var filePath = (src.substr(0,1) === "/") ? path.resolve(options.assetsDir, src.substr(1)) : path.join(path.dirname(filePair.src), src);
-          grunt.log.writeln(('  image: ').cyan + filePath);
+            var filePath = (src.substr(0,1) === "/") ? path.resolve(options.assetsDir, src.substr(1)) : path.join(path.dirname(filePair.src), src);
+            grunt.log.writeln(('    svg: ').cyan + filePath);
 
-          $(this).attr('src', 'data:image/' + src.substr(src.lastIndexOf('.')+1) + ';base64,' + new Buffer(grunt.file.read(filePath, { encoding: null })).toString('base64'));
+            if (options.inlineSvgBase64) {
+              $(this).attr('src', 'data:image/svg+xml;base64,' + new Buffer(grunt.file.read(filePath, { encoding: null })).toString('base64'));
+            } else {
+              $(this).attr('src', 'data:image/svg+xml;utf8,' + processSvg(grunt.file.read(filePath)));
+            }
 
-          if (options.deleteOriginals) {
-            filesToDelete.push(filePath);
-          }
-        });
-      }
+            if (options.deleteOriginals) {
+              filesToDelete.push(filePath);
+            }
+          });
+        }
 
-      var html = $.html();
-      // replace relative path
-      html = html.replace(/[.]{2}\//g, options.assetsUrlPrefix);
-      grunt.file.write(path.resolve(filePair.dest), html);
-      grunt.log.writeln(('Created: ').green + path.resolve(filePair.dest) + '\n');
+        if (options.inlineImg) {
+          $('img').each(function () {
+            var src = $(this).attr('src');
+            if (!src) { return; }
+            if (src.match(/^\/\//)) { return; }
+            if (src.match(/.svg$/i)) { return; }
+            if (url.parse(src).protocol) { return; }
+
+            var filePath = (src.substr(0,1) === "/") ? path.resolve(options.assetsDir, src.substr(1)) : path.join(path.dirname(filePair.src), src);
+            grunt.log.writeln(('  image: ').cyan + filePath);
+
+            $(this).attr('src', 'data:image/' + src.substr(src.lastIndexOf('.')+1) + ';base64,' + new Buffer(grunt.file.read(filePath, { encoding: null })).toString('base64'));
+
+            if (options.deleteOriginals) {
+              filesToDelete.push(filePath);
+            }
+          });
+        }
+
+        var html = $.html();
+        // replace relative path
+        html = html.replace(/[.]{2}\//g, options.assetsUrlPrefix);
+        grunt.file.write(path.resolve(filePair.dest), html);
+        grunt.log.writeln(('Created: ').green + path.resolve(filePair.dest) + '\n');
+      });
     });
 
     // Delete the original files
